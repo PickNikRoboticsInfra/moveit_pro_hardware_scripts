@@ -31,12 +31,12 @@ Replace `<version>` with the target version (e.g. `9.2.0-rc6`). Downgrades work 
 Each example script sends one goal and exits; the Behavior Tree itself loops internally.
 
 ```bash
-/usr/bin/3-waypoint-pick-and-place.py
-/usr/bin/ml-segment-image.py
-/usr/bin/move-all-boxes.py
+/usr/bin/3-waypoint-pick-and-place.mjs
+/usr/bin/ml-segment-image.mjs
+/usr/bin/move-all-boxes.mjs
 ```
 
-To wrap your own objective into a forever-loop driver, copy `example_scripts/cd_objective_lib.py` and call `run_objectives_forever([...])` with the Objective names you want to chain.
+To wrap your own objective into a forever-loop driver, copy `example_scripts/cd_objective_lib.mjs` and call `runObjectivesForever([...])` with the Objective names you want to chain.
 
 ## Troubleshooting
 

@@ -4,7 +4,8 @@
 Two call sites fire on a QA deployment failure:
 
   * notify-crash.py        -- systemd ExecStopPost on non-zero service exit.
-  * cd_objective_lib.py    -- objective-runner timeout / rosbridge failure.
+  * cd_objective_lib.mjs   -- objective-runner timeout / web-bridge failure
+                              (invokes this module's --title/--reason CLI shim).
 
 Both post to Slack (SLACK_WEBHOOK_URL) and, when a token is configured, open
 or update a deduplicated GitHub issue on the MoveIt Pro repo. Every function
@@ -324,3 +325,40 @@ def _do_github_issue(title, reason_cell, version, hostname, when, repo, label, t
         },
     )
     print(f"Updated GitHub issue #{number} (occurrence #{occurrence}): {title}")
+
+
+def _main(argv=None):
+    """CLI entry point so non-Python callers (e.g. the Node CD runner) can send
+    the same Slack + deduplicated-GitHub-issue failure notification this module
+    exposes to Python importers.
+
+    Best-effort: a failure in one channel never blocks the other, and the command
+    always exits 0 — notifications are auxiliary to stopping the service, which
+    the caller handles separately.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Send a CD failure notification (Slack + deduplicated GitHub issue)."
+    )
+    parser.add_argument("--title", required=True, help="GitHub issue title.")
+    parser.add_argument(
+        "--reason", required=True, help="Failure reason (Slack message + issue body)."
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Log the payloads instead of posting."
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        slack_post(build_payload(args.reason), dry_run=args.dry_run)
+    except Exception as exc:  # noqa: BLE001 - notifications are best-effort
+        print(f"slack_post failed: {exc}", file=sys.stderr)
+    try:
+        github_issue(args.title, args.reason, dry_run=args.dry_run)
+    except Exception as exc:  # noqa: BLE001 - notifications are best-effort
+        print(f"github_issue failed: {exc}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    _main()
