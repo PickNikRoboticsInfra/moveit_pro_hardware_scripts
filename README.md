@@ -8,7 +8,7 @@ The full setup walkthrough lives at [Set Up CI/CD](https://docs.picknik.ai/how_t
 
 - `install.sh` — one-shot installer. Copies the wrapper, systemd unit, and sudoers drop-in into place. Run on each target machine.
 - `bin/install-moveit-pro` — root-owned installer wrapper. Validates the version string against a strict regex, downloads the `.deb` to a root-owned cache, installs it, and deletes the file.
-- `bin/moveit-pro@.service` — systemd template unit. Runs `moveit_pro run --no-browser` as `%i`. Restarts on failure. Reads optional environment from `/etc/default/moveit-pro`.
+- `bin/moveit-pro@.service` — systemd template unit. Runs `moveit_pro run` as `%i`. Does not restart on failure (`Restart=no`) — the `ExecStopPost` hook reports the crash instead. Reads optional environment from `/etc/default/moveit-pro`.
 - `bin/notify-crash.py` — posts to Slack and opens/updates a GitHub issue via `ExecStopPost` when the service exits non-zero. Reads `SLACK_WEBHOOK_URL` and `MOVEIT_CD_GITHUB_TOKEN` from the environment; each notification is skipped if its variable is unset.
 - `bin/notify_lib.py` — shared notification helpers (`slack_post`, `github_issue`) used by both `notify-crash.py` and `cd_objective_lib.py`. Installed to `/usr/lib/moveit-pro-scripts/`. `github_issue` deduplicates by exact title within a label: a repeated failure bumps an occurrence counter and appends a row instead of opening a new issue.
 - `bin/ci-runner.sudoers.template` — sudoers drop-in. `install.sh` substitutes `__CI_USER__` with the local account and installs at `/etc/sudoers.d/<user>-ci`. Grants NOPASSWD on the installer and the user's own systemd unit only.
