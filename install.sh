@@ -64,9 +64,11 @@ install -m 755 "$SCRIPT_DIR/example_scripts/move-all-boxes.py" /usr/bin/move-all
 echo "Installing notify-crash.py to /usr/bin/"
 install -m 755 "$SCRIPT_DIR/bin/notify-crash.py" /usr/bin/notify-crash.py
 
-echo "Installing install-moveit-pro to /usr/local/sbin/"
+echo "Installing install-moveit-pro and moveit-pro-run to /usr/local/sbin/"
 install -m 755 -o root -g root \
     "$SCRIPT_DIR/bin/install-moveit-pro" /usr/local/sbin/install-moveit-pro
+install -m 755 -o root -g root \
+    "$SCRIPT_DIR/bin/moveit-pro-run" /usr/local/sbin/moveit-pro-run
 install -d -m 0755 -o root -g root /var/cache/moveit-pro
 
 if [[ -n "$CONFIG_SRC" ]]; then
@@ -76,29 +78,6 @@ fi
 
 echo "Installing systemd services"
 cp "$SCRIPT_DIR/bin/moveit-pro@.service" /etc/systemd/system/moveit-pro@.service
-
-# Install virtual-screen service if not already present.
-if [ ! -f /etc/systemd/system/virtual-screen.service ]; then
-    echo "Installing xvfb"
-    apt-get install -y xvfb
-    echo "Installing virtual-screen.service"
-    tee /etc/systemd/system/virtual-screen.service > /dev/null << 'EOF'
-[Unit]
-Description=Virtual Screen Service
-
-[Service]
-ExecStart=/usr/bin/Xvfb :99 -screen 0 1024x768x24
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    systemctl daemon-reload
-    systemctl enable virtual-screen.service
-    systemctl start virtual-screen.service
-else
-    echo "virtual-screen.service already installed, skipping"
-fi
 
 systemctl daemon-reload
 

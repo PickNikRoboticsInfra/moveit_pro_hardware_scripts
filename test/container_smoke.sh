@@ -45,13 +45,12 @@ fail() {
 echo "::: checking installed files"
 for f in /usr/bin/3-waypoint-pick-and-place.py /usr/bin/ml-segment-image.py \
     /usr/bin/move-all-boxes.py /usr/bin/notify-crash.py \
-    /usr/local/sbin/install-moveit-pro; do
+    /usr/local/sbin/install-moveit-pro /usr/local/sbin/moveit-pro-run; do
     [[ -x "$f" ]] || fail "$f missing or not executable"
 done
 for f in /usr/lib/moveit-pro-scripts/cd_objective_lib.py \
     /usr/lib/moveit-pro-scripts/notify_lib.py \
-    /etc/systemd/system/moveit-pro@.service \
-    /etc/systemd/system/virtual-screen.service; do
+    /etc/systemd/system/moveit-pro@.service; do
     [[ -f "$f" ]] || fail "$f missing"
 done
 
@@ -69,6 +68,28 @@ for verb in restart stop; do
     su "$CI_USER" -c "sudo -n systemctl $verb moveit-pro@${CI_USER}.service" > /dev/null 2>&1 \
         || fail "sudo -n systemctl $verb was not permitted"
 done
+
+echo "::: checking the ExecStart wrapper picks the flag per installed version"
+# Below 10.x the launcher refuses to start without a DISPLAY unless --headless is
+# passed; on 10.x the flag means something unrelated and must be left off.
+stub_cli() {
+    # Single-quoted on purpose: $1 and $* must reach the stub literally.
+    # shellcheck disable=SC2016
+    printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "MoveIt Pro version: %s"; exit 0; fi\necho "ARGS: $*"\n' \
+        "$1" > /tmp/moveit_pro_stub
+    chmod 755 /tmp/moveit_pro_stub
+}
+wrapper_args() {
+    stub_cli "$1"
+    MOVEIT_PRO_CLI=/tmp/moveit_pro_stub /usr/local/sbin/moveit-pro-run
+}
+if ! wrapper_args "9.4.2" | grep -q -- "--headless"; then
+    fail "9.4 did not get --headless"
+fi
+if wrapper_args "10.0.0-rc11" | grep -q -- "--headless"; then
+    fail "10.x was given --headless, which suppresses driver X11 forwarding"
+fi
+echo "  9.4 -> --headless, 10.x -> omitted"
 
 echo "::: checking the objective runner imports under this release's python3"
 # Importing exercises the notify_lib path resolution the wrappers rely on.
