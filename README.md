@@ -25,8 +25,9 @@ docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/test/container_smoke.sh
 ## Contents
 
 - `install.sh` — one-shot installer. Installs apt prerequisites, then copies the wrapper, systemd unit, and sudoers drop-in into place. Must be run as root; run it on each target machine.
+- `bin/moveit-pro-run` — the unit's `ExecStart`. Reads `moveit_pro --version` and passes `--headless` only below 10.x. There the launcher refuses to start without a `DISPLAY` unless `--headless` is set, and the flag drops only the `web_ui` service, so the REST API, the web bridge on `3201`, and video stay reachable and no browser is opened. On 10.x MuJoCo renders through EGL with no display, and `--headless` means something unrelated there, so it is left off. An unreadable version omits it.
 - `bin/install-moveit-pro` — root-owned installer wrapper. Validates the version string against a strict regex, downloads the `.deb` to a root-owned cache, installs it, and deletes the file.
-- `bin/moveit-pro@.service` — systemd template unit. Runs `moveit_pro run` as `%i`. Does not restart on failure (`Restart=no`) — the `ExecStopPost` hook reports the crash instead. Reads optional environment from `/etc/default/moveit-pro`.
+- `bin/moveit-pro@.service` — systemd template unit. Runs `moveit-pro-run` as `%i`. Does not restart on failure (`Restart=no`) — the `ExecStopPost` hook reports the crash instead. Reads optional environment from `/etc/default/moveit-pro`.
 - `bin/notify-crash.py` — posts to Slack and opens/updates a GitHub issue via `ExecStopPost` when the service exits non-zero. Reads `SLACK_WEBHOOK_URL` and `MOVEIT_CD_GITHUB_TOKEN` from the environment; each notification is skipped if its variable is unset.
 - `bin/notify_lib.py` — shared notification helpers (`slack_post`, `github_issue`) used by `notify-crash.py` (Python import) and by the CD objective runner (`cd_objective_lib.py`, via a Python import). Installed to `/usr/lib/moveit-pro-scripts/`. `github_issue` deduplicates by exact title within a label: a repeated failure bumps an occurrence counter and appends a row instead of opening a new issue.
 - `bin/ci-runner.sudoers.template` — sudoers drop-in. `install.sh` substitutes `__CI_USER__` with the local account and installs at `/etc/sudoers.d/<user>-ci`. Grants NOPASSWD on the installer and the user's own systemd unit only.
@@ -46,13 +47,13 @@ sudo ./install.sh
 
 This installs:
 
-- Prerequisites via apt (`ca-certificates`, `curl`, `python3`, `xvfb`).
+- Prerequisites via apt (`ca-certificates`, `curl`, `python3`).
 - The objective scripts to `/usr/bin/`.
 - `cd_objective_lib.py` and `notify_lib.py` to `/usr/lib/moveit-pro-scripts/`.
 - `notify-crash.py` to `/usr/bin/`.
-- `install-moveit-pro` to `/usr/local/sbin/` (root-owned, `0755`).
+- `install-moveit-pro` and `moveit-pro-run` to `/usr/local/sbin/` (root-owned, `0755`).
 - `/var/cache/moveit-pro/` as a root-owned download cache.
-- `moveit-pro@.service` and `virtual-screen.service` to `/etc/systemd/system/`.
+- `moveit-pro@.service` to `/etc/systemd/system/`.
 - `/etc/sudoers.d/<user>-ci` (validated with `visudo -cf`) granting NOPASSWD on the installer and `systemctl restart`/`stop` of the user's own service unit.
 
 The install script enables — but does not start — the MoveIt Pro service for the current user.

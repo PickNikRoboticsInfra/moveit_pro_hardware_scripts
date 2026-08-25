@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Installed at /usr/local/sbin/moveit-pro-run (root:root 0755).
+# ExecStart for moveit-pro@.service.
+#
+# A CD target has no console, and install-moveit-pro can move one machine
+# between the 9.4.x and 10.x series, so the right `moveit_pro run` arguments are
+# not knowable at install time. Pick them from the version actually installed.
+#
+# Below 10.x, pass --headless. It drops only the web_ui service, so the agent,
+# drivers, and agent_bridge still run and the REST API, the web bridge on 3201,
+# and video stay reachable. It also skips the launcher's hard requirement for
+# DISPLAY, which otherwise aborts startup on a machine with no X server, and
+# implies no browser is opened.
+#
+# On 10.x it is neither needed nor wanted: MuJoCo renders through EGL with no
+# display, and --headless there means something else entirely (it suppresses
+# X11 forwarding for graphical driver programs).
+
+set -euo pipefail
+
+MOVEIT_PRO_CLI="${MOVEIT_PRO_CLI:-/usr/bin/moveit_pro}"
+
+# `moveit_pro --version` prints "MoveIt Pro version: 10.0.0-rc11".
+moveit_pro_major() {
+    local line
+    line="$("$MOVEIT_PRO_CLI" --version 2> /dev/null)" || return 1
+    sed -n 's/^MoveIt Pro version:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<< "$line"
+}
+
+run_args=(run -v)
+
+# Fail safe toward omitting the flag: 10.x rejects nothing here, but a wrong
+# guess that adds --headless on 10.x would silently change driver X11 handling.
+major="$(moveit_pro_major || true)"
+if [[ -n "$major" && "$major" -lt 10 ]]; then
+    run_args+=(--headless)
+elif [[ -z "$major" ]]; then
+    echo "Could not read a version from '$MOVEIT_PRO_CLI --version'; omitting --headless" >&2
+fi
+
+exec "$MOVEIT_PRO_CLI" "${run_args[@]}" "$@"
