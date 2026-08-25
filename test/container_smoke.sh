@@ -70,8 +70,9 @@ for verb in restart stop; do
 done
 
 echo "::: checking the ExecStart wrapper picks the flag per installed version"
-# Below 10.x the launcher refuses to start without a DISPLAY unless --headless is
-# passed; on 10.x the flag means something unrelated and must be left off.
+# --headless is required on both series. --no-discovery exists only from 10.x, and
+# keeps the unit from supervising the deploy script's daemon; passing it to 9.4
+# aborts its typer CLI.
 stub_cli() {
     # Single-quoted on purpose: $1 and $* must reach the stub literally.
     # shellcheck disable=SC2016
@@ -83,13 +84,18 @@ wrapper_args() {
     stub_cli "$1"
     MOVEIT_PRO_CLI=/tmp/moveit_pro_stub /usr/local/sbin/moveit-pro-run
 }
-if ! wrapper_args "9.4.2" | grep -q -- "--headless"; then
-    fail "9.4 did not get --headless"
+for version in 9.4.2 10.0.0-rc11; do
+    if ! wrapper_args "$version" | grep -q -- "--headless"; then
+        fail "$version did not get --headless"
+    fi
+done
+if wrapper_args "9.4.2" | grep -q -- "--no-discovery"; then
+    fail "9.4 was given --no-discovery, which aborts its typer CLI"
 fi
-if wrapper_args "10.0.0-rc11" | grep -q -- "--headless"; then
-    fail "10.x was given --headless, which suppresses driver X11 forwarding"
+if ! wrapper_args "10.0.0-rc11" | grep -q -- "--no-discovery"; then
+    fail "10.x did not get --no-discovery, so the unit may supervise its own daemon"
 fi
-echo "  9.4 -> --headless, 10.x -> omitted"
+echo "  --headless on both, --no-discovery on 10.x only"
 
 echo "::: checking the objective runner imports under this release's python3"
 # Importing exercises the notify_lib path resolution the wrappers rely on.

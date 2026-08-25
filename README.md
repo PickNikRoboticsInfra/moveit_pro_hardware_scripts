@@ -25,7 +25,7 @@ docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/test/container_smoke.sh
 ## Contents
 
 - `install.sh` — one-shot installer. Installs apt prerequisites, then copies the wrapper, systemd unit, and sudoers drop-in into place. Must be run as root; run it on each target machine.
-- `bin/moveit-pro-run` — the unit's `ExecStart`. Reads `moveit_pro --version` and passes `--headless` only below 10.x. There the launcher refuses to start without a `DISPLAY` unless `--headless` is set, and the flag drops only the `web_ui` service, so the REST API, the web bridge on `3201`, and video stay reachable and no browser is opened. On 10.x MuJoCo renders through EGL with no display, and `--headless` means something unrelated there, so it is left off. An unreadable version omits it.
+- `bin/moveit-pro-run` — the unit's `ExecStart`. Passes `--headless` on every series: below 10.x the launcher refuses to start without a `DISPLAY` unless it is set, and it drops only the `web_ui` service, so the REST API, the web bridge on `3201`, and video stay reachable and no browser opens. It also reads `moveit_pro --version` to add `--no-discovery` from 10.x, where that flag stops the unit from supervising a discovery daemon the MoveIt Pro deploy script owns; 9.4.x has no such option and its CLI rejects unknown ones, so an unreadable version omits it.
 - `bin/install-moveit-pro` — root-owned installer wrapper. Validates the version string against a strict regex, downloads the `.deb` to a root-owned cache, installs it, and deletes the file.
 - `bin/moveit-pro@.service` — systemd template unit. Runs `moveit-pro-run` as `%i`. Does not restart on failure (`Restart=no`) — the `ExecStopPost` hook reports the crash instead. Reads optional environment from `/etc/default/moveit-pro`.
 - `bin/notify-crash.py` — posts to Slack and opens/updates a GitHub issue via `ExecStopPost` when the service exits non-zero. Reads `SLACK_WEBHOOK_URL` and `MOVEIT_CD_GITHUB_TOKEN` from the environment; each notification is skipped if its variable is unset.
@@ -105,6 +105,31 @@ If a variable is unset, that notification is silently skipped — this is how no
 `MOVEIT_CD_GITHUB_TOKEN` must be a **fine-grained PAT scoped to the issue repo with `Issues: Read and write` and nothing else** — the narrowest credential that can file an issue. Do not grant `Contents` or any other scope: a QA machine is a higher-exposure host, and the token only needs to open and comment on issues. The `qa-deployment-failure` label must already exist on the repo (the API does not create labels on demand).
 
 Repeated failures of the same kind on the same machine deduplicate to a single issue (matched by title within the label) — each recurrence bumps an occurrence counter, appends a table row with the version/time/reason, and adds a comment for visibility.
+
+## Desktop App pairing
+
+A QA machine is only reachable from the MoveIt Pro Desktop App if the host runs an
+instance discovery daemon and the Runtime registers with it. Those are two jobs with
+two owners, and this repo owns only the second.
+
+**Starting the daemon is not done here.** It is a systemd user service, and the MoveIt
+Pro deploy script sets it up (`moveit_pro discovery up`, which also enables the user
+lingering that keeps the daemon alive past logout). Nothing in this repo starts it
+or enables that lingering.
+
+**Registering with it is done here, by staying out of the way.** From 10.x the unit
+passes `--no-discovery`, so `moveit_pro run` never starts or supervises a daemon of its
+own; it registers with whichever one is already serving. That behavior needs
+[moveit_pro#21965](https://github.com/PickNikRobotics/moveit_pro/pull/21965), merged to
+`v10.0`, which made the flag mean "do not supervise" rather than "do not pair". On a
+10.x release built before that merge the flag still suppresses pairing, so the machine
+will not be discoverable.
+
+To check the daemon side of the arrangement on a target:
+
+```bash
+moveit_pro discovery status   # as the CI user
+```
 
 ## Verify the install
 

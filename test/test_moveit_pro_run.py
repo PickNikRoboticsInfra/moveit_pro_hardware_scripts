@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Tests for the version-aware ExecStart wrapper.
 
-Below 10.x the launcher aborts without a DISPLAY unless --headless is passed;
-10.x renders through EGL and gives --headless an unrelated meaning. The wrapper
-picks the flag from the installed version. The real CLI is replaced
+--headless is needed on every supported series. --no-discovery exists only from
+10.x and keeps the unit from supervising a discovery daemon that install.sh
+owns, so the wrapper picks it from the installed version. The real CLI is replaced
 here with a stub that reports a version and echoes the arguments it receives.
 Run with:
 
@@ -51,24 +51,31 @@ class TestVersionAwareFlag(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout.strip()
 
-    def test_9_4_gets_the_flag(self):
-        self.assertIn("--headless", self._args_for_version("MoveIt Pro version: 9.4.2"))
-
-    def test_10_x_does_not_get_the_flag(self):
-        # On 10.x --headless suppresses driver X11 forwarding, which is not wanted.
+    def test_9_4_does_not_get_no_discovery(self):
+        # 9.4's typer CLI rejects the unknown option and the unit dies.
         self.assertNotIn(
-            "--headless", self._args_for_version("MoveIt Pro version: 10.0.0-rc11")
+            "--no-discovery", self._args_for_version("MoveIt Pro version: 9.4.2")
         )
 
-    def test_a_release_candidate_below_10_still_gets_the_flag(self):
+    def test_10_x_gets_no_discovery(self):
         self.assertIn(
-            "--headless", self._args_for_version("MoveIt Pro version: 9.4.3-rc1")
+            "--no-discovery", self._args_for_version("MoveIt Pro version: 10.0.0-rc11")
         )
 
-    def test_a_future_major_does_not_get_the_flag(self):
+    def test_a_release_candidate_below_10_does_not_get_it(self):
         self.assertNotIn(
-            "--headless", self._args_for_version("MoveIt Pro version: 11.0.0")
+            "--no-discovery", self._args_for_version("MoveIt Pro version: 9.4.3-rc1")
         )
+
+    def test_a_future_major_gets_it(self):
+        self.assertIn(
+            "--no-discovery", self._args_for_version("MoveIt Pro version: 11.0.0")
+        )
+
+    def test_headless_is_passed_on_every_series(self):
+        for line in ("MoveIt Pro version: 9.4.2", "MoveIt Pro version: 10.0.0"):
+            with self.subTest(version=line):
+                self.assertIn("--headless", self._args_for_version(line))
 
     def test_run_and_verbose_are_always_passed(self):
         args = self._args_for_version("MoveIt Pro version: 10.0.0")
@@ -77,7 +84,7 @@ class TestVersionAwareFlag(unittest.TestCase):
 
 
 class TestDegradedVersionLookup(unittest.TestCase):
-    """An unreadable version must omit the flag: on 10.x it would be fatal."""
+    """An unreadable version must omit --no-discovery rather than guess."""
 
     def _stdout_stderr(self, version_behavior):
         with tempfile.TemporaryDirectory() as tmp:
@@ -88,13 +95,13 @@ class TestDegradedVersionLookup(unittest.TestCase):
     def test_nonzero_version_exit_omits_the_flag_and_still_runs(self):
         result = self._stdout_stderr("exit 3")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("--headless", result.stdout)
+        self.assertNotIn("--no-discovery", result.stdout)
 
     def test_unparseable_version_omits_the_flag_and_warns(self):
         result = self._stdout_stderr('echo "something else entirely"; exit 0')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("--headless", result.stdout)
-        self.assertIn("omitting --headless", result.stderr)
+        self.assertNotIn("--no-discovery", result.stdout)
+        self.assertIn("omitting --no-discovery", result.stderr)
 
     def test_extra_arguments_are_forwarded(self):
         with tempfile.TemporaryDirectory() as tmp:
