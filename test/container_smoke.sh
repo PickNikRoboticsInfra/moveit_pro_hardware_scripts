@@ -42,23 +42,14 @@ fail() {
     exit 1
 }
 
-echo "::: checking Node toolchain"
-[[ -x /usr/bin/node ]] || fail "no /usr/bin/node"
-[[ -x /usr/bin/npm ]] || fail "no /usr/bin/npm — apt packages npm separately from nodejs"
-node_major="$(/usr/bin/node -p 'process.versions.node.split(".")[0]')"
-[[ "$node_major" -ge 22 ]] || fail "node major $node_major is below the supported floor"
-echo "  node $(/usr/bin/node --version), npm $(/usr/bin/npm --version)"
-
 echo "::: checking installed files"
-for f in /usr/bin/3-waypoint-pick-and-place.mjs /usr/bin/ml-segment-image.mjs \
-    /usr/bin/move-all-boxes.mjs /usr/bin/notify-crash.py \
+for f in /usr/bin/3-waypoint-pick-and-place.py /usr/bin/ml-segment-image.py \
+    /usr/bin/move-all-boxes.py /usr/bin/notify-crash.py \
     /usr/local/sbin/install-moveit-pro; do
     [[ -x "$f" ]] || fail "$f missing or not executable"
 done
-for f in /usr/lib/moveit-pro-scripts/cd_objective_lib.mjs \
-    /usr/lib/moveit-pro-scripts/ws-polyfill.mjs \
+for f in /usr/lib/moveit-pro-scripts/cd_objective_lib.py \
     /usr/lib/moveit-pro-scripts/notify_lib.py \
-    /usr/lib/moveit-pro-scripts/node_modules/foxglove-ros-adapter/package.json \
     /etc/systemd/system/moveit-pro@.service \
     /etc/systemd/system/virtual-screen.service; do
     [[ -f "$f" ]] || fail "$f missing"
@@ -79,10 +70,10 @@ for verb in restart stop; do
         || fail "sudo -n systemctl $verb was not permitted"
 done
 
-echo "::: checking the Node runner loads under this release's node"
-node --input-type=module \
-    -e 'import "/usr/lib/moveit-pro-scripts/cd_objective_lib.mjs";' \
-    || fail "cd_objective_lib.mjs failed to load"
+echo "::: checking the objective runner imports under this release's python3"
+# Importing exercises the notify_lib path resolution the wrappers rely on.
+python3 -c 'import sys; sys.path.insert(0, "/usr/lib/moveit-pro-scripts"); import cd_objective_lib' \
+    || fail "cd_objective_lib.py failed to import"
 
 echo "::: checking the notifiers run under this release's python3"
 command -v python3 > /dev/null || fail "install.sh did not provide python3"

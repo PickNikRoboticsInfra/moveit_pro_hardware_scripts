@@ -44,55 +44,22 @@ esac
 
 # Ubuntu server images do not all ship curl, and a freshly imaged machine may
 # have no package lists at all, so bootstrap both before anything reaches out.
-# python3 runs notify-crash.py from the unit's ExecStopPost and notify_lib.py
-# from the CD runner, so name it here rather than relying on some other
+# python3 runs notify-crash.py from the unit's ExecStopPost and the CD
+# objective runner, so name it here rather than relying on some other
 # package to drag it in.
 echo "Refreshing package lists and installing prerequisites"
 apt-get update
-apt-get install -y ca-certificates curl gnupg python3
-
-# The CD objective runner is Node (foxglove-ros-adapter over the web bridge on
-# 3201). Node 22 is the floor: it is what 26.04 ships in apt, and 18 and 20 are
-# both past end-of-life. Bump NODE_MAJOR_MIN when 22 goes EOL in April 2027.
-NODE_MAJOR_MIN=22
-
-# Probe /usr/bin directly rather than PATH. A shell running install.sh may have
-# an nvm or fnm shim in front, but the /usr/bin/*.mjs shebangs and the `npm`
-# call below resolve against the system PATH, which never sees it.
-system_node_major() {
-    if [[ -x /usr/bin/node ]]; then
-        /usr/bin/node -p 'process.versions.node.split(".")[0]' 2> /dev/null || echo 0
-    else
-        echo 0
-    fi
-}
-
-# Ubuntu packages npm separately from nodejs, so a new-enough node is not on its
-# own proof that npm is there. NodeSource ships both in one package.
-if [[ "$(system_node_major)" -lt "$NODE_MAJOR_MIN" || ! -x /usr/bin/npm ]]; then
-    echo "Installing Node.js ${NODE_MAJOR_MIN} LTS (via NodeSource)"
-    # No `sudo -E`: we are already root, and 26.04's sudo-rs ignores -E anyway.
-    # NodeSource's repo is distro-independent (Suites: nodistro), so one URL
-    # covers all three releases.
-    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR_MIN}.x" | bash -
-    apt-get install -y nodejs
-fi
-echo "Using Node $(/usr/bin/node --version) with npm $(/usr/bin/npm --version)"
+apt-get install -y ca-certificates curl python3
 
 echo "Installing shared libraries to /usr/lib/moveit-pro-scripts/"
 install -d -m 0755 -o root -g root /usr/lib/moveit-pro-scripts
-install -m 644 "$SCRIPT_DIR/example_scripts/cd_objective_lib.mjs" /usr/lib/moveit-pro-scripts/cd_objective_lib.mjs
-install -m 644 "$SCRIPT_DIR/example_scripts/ws-polyfill.mjs" /usr/lib/moveit-pro-scripts/ws-polyfill.mjs
-install -m 644 "$SCRIPT_DIR/example_scripts/package.json" /usr/lib/moveit-pro-scripts/package.json
+install -m 644 "$SCRIPT_DIR/example_scripts/cd_objective_lib.py" /usr/lib/moveit-pro-scripts/cd_objective_lib.py
 install -m 644 "$SCRIPT_DIR/bin/notify_lib.py" /usr/lib/moveit-pro-scripts/notify_lib.py
 
-echo "Installing Node dependencies for the CD runner"
-npm install --omit=dev --prefix /usr/lib/moveit-pro-scripts
-
 echo "Installing objective scripts to /usr/bin/"
-install -m 755 "$SCRIPT_DIR/example_scripts/3-waypoint-pick-and-place.mjs" /usr/bin/3-waypoint-pick-and-place.mjs
-install -m 755 "$SCRIPT_DIR/example_scripts/ml-segment-image.mjs" /usr/bin/ml-segment-image.mjs
-install -m 755 "$SCRIPT_DIR/example_scripts/move-all-boxes.mjs" /usr/bin/move-all-boxes.mjs
+install -m 755 "$SCRIPT_DIR/example_scripts/3-waypoint-pick-and-place.py" /usr/bin/3-waypoint-pick-and-place.py
+install -m 755 "$SCRIPT_DIR/example_scripts/ml-segment-image.py" /usr/bin/ml-segment-image.py
+install -m 755 "$SCRIPT_DIR/example_scripts/move-all-boxes.py" /usr/bin/move-all-boxes.py
 
 echo "Installing notify-crash.py to /usr/bin/"
 install -m 755 "$SCRIPT_DIR/bin/notify-crash.py" /usr/bin/notify-crash.py

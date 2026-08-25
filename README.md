@@ -10,10 +10,10 @@ Ubuntu 22.04, 24.04, and 26.04, on each release's stock `sudo` (26.04 defaults t
 `sudo-rs`) and stock `python3` (3.10, 3.12, and 3.14 — everything here is
 standard library, so nothing is pip-installed and PEP 668 never comes up).
 
-`install.sh` needs Node 22 or newer and its `npm`. 22.04 and 24.04 both package a
-Node older than that, and Ubuntu ships `npm` as a package separate from `nodejs`,
-so on most machines the installer pulls Node 22 LTS from NodeSource. It leaves an
-existing system Node alone when that Node is new enough and `npm` is beside it.
+Nothing here needs a language runtime beyond the system `python3`. The objective
+runner drives the `/do_objective` action through `moveit_pro shell`, so ROS 2 and
+`moveit_studio_sdk_msgs` stay inside the Runtime container and the host installs
+no ROS 2 packages of its own.
 
 `test/container_smoke.sh` runs the installer end-to-end in a bare container and
 checks the result. CI runs it on all three releases; to run it yourself:
@@ -24,16 +24,15 @@ docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/test/container_smoke.sh
 
 ## Contents
 
-- `install.sh` — one-shot installer. Installs prerequisites (including Node), then copies the wrapper, systemd unit, and sudoers drop-in into place. Must be run as root; run it on each target machine.
+- `install.sh` — one-shot installer. Installs apt prerequisites, then copies the wrapper, systemd unit, and sudoers drop-in into place. Must be run as root; run it on each target machine.
 - `bin/install-moveit-pro` — root-owned installer wrapper. Validates the version string against a strict regex, downloads the `.deb` to a root-owned cache, installs it, and deletes the file.
 - `bin/moveit-pro@.service` — systemd template unit. Runs `moveit_pro run` as `%i`. Does not restart on failure (`Restart=no`) — the `ExecStopPost` hook reports the crash instead. Reads optional environment from `/etc/default/moveit-pro`.
 - `bin/notify-crash.py` — posts to Slack and opens/updates a GitHub issue via `ExecStopPost` when the service exits non-zero. Reads `SLACK_WEBHOOK_URL` and `MOVEIT_CD_GITHUB_TOKEN` from the environment; each notification is skipped if its variable is unset.
-- `bin/notify_lib.py` — shared notification helpers (`slack_post`, `github_issue`) used by `notify-crash.py` (Python import) and by the CD objective runner (`cd_objective_lib.mjs`, via the module's `--title`/`--reason` CLI shim). Installed to `/usr/lib/moveit-pro-scripts/`. `github_issue` deduplicates by exact title within a label: a repeated failure bumps an occurrence counter and appends a row instead of opening a new issue.
+- `bin/notify_lib.py` — shared notification helpers (`slack_post`, `github_issue`) used by `notify-crash.py` (Python import) and by the CD objective runner (`cd_objective_lib.py`, via a Python import). Installed to `/usr/lib/moveit-pro-scripts/`. `github_issue` deduplicates by exact title within a label: a repeated failure bumps an occurrence counter and appends a row instead of opening a new issue.
 - `bin/ci-runner.sudoers.template` — sudoers drop-in. `install.sh` substitutes `__CI_USER__` with the local account and installs at `/etc/sudoers.d/<user>-ci`. Grants NOPASSWD on the installer and the user's own systemd unit only.
-- `example_scripts/cd_objective_lib.mjs` — Node helper library for sending an Objective goal over the MoveIt Pro web bridge (`foxglove_bridge`, port `3201`) using [`foxglove-ros-adapter`](https://www.npmjs.com/package/foxglove-ros-adapter). No `--enable-rosbridge` sidecar needed. On objective timeout or bridge failure it posts to Slack, opens/updates a GitHub issue, and stops the systemd unit (via `notify_lib.py`).
-- `example_scripts/package.json` / `ws-polyfill.mjs` — Node dependency manifest (installed alongside the runner and `npm install`ed by `install.sh`) and the `WebSocket` global shim for Node 18–21. The shim does nothing on Node 22+, which is what the installer sets up; it stays for machines pinned to an older Node.
+- `example_scripts/cd_objective_lib.py` — helper library for sending an Objective goal to the `/do_objective` action. It shells out to `moveit_pro shell ros2 action send_goal`, which runs inside the Runtime container where ROS 2 already lives, and blocks until the goal reaches a terminal state. Nothing touches the web bridge, so there is no TLS handshake, no `MOVEIT_FRONTEND_KEY`, and no port to keep in sync. On timeout or an unreachable action server it posts to Slack, opens/updates a GitHub issue, and stops the systemd unit (via `notify_lib.py`).
 - `test/container_smoke.sh` — runs `install.sh` in a bare Ubuntu container and verifies the result. See [Supported systems](#supported-systems).
-- `example_scripts/3-waypoint-pick-and-place.mjs`, `example_scripts/ml-segment-image.mjs`, `example_scripts/move-all-boxes.mjs` — example smoke-test scripts that drive an Objective over the web bridge on `localhost:3201`.
+- `example_scripts/3-waypoint-pick-and-place.py`, `example_scripts/ml-segment-image.py`, `example_scripts/move-all-boxes.py` — example smoke-test scripts, each a two-line wrapper around `cd_objective_lib.run_objective(<name>)`.
 
 ## Install
 
@@ -47,9 +46,9 @@ sudo ./install.sh
 
 This installs:
 
-- Prerequisites via apt (`ca-certificates`, `curl`, `gnupg`, `xvfb`) and, when the system Node is too old or has no `npm`, Node 22 LTS from NodeSource.
+- Prerequisites via apt (`ca-certificates`, `curl`, `python3`, `xvfb`).
 - The objective scripts to `/usr/bin/`.
-- `cd_objective_lib.mjs` (with its Node dependencies via `npm install`) and `notify_lib.py` to `/usr/lib/moveit-pro-scripts/`.
+- `cd_objective_lib.py` and `notify_lib.py` to `/usr/lib/moveit-pro-scripts/`.
 - `notify-crash.py` to `/usr/bin/`.
 - `install-moveit-pro` to `/usr/local/sbin/` (root-owned, `0755`).
 - `/var/cache/moveit-pro/` as a root-owned download cache.
@@ -128,7 +127,7 @@ The CI runner SSHes into each target machine over a mesh VPN (Tailscale, WireGua
 
 1. `sudo -n /usr/local/sbin/install-moveit-pro <version>` — downloads and installs the `.deb`.
 2. `sudo -n /bin/systemctl restart moveit-pro@<user>.service` — restarts the service.
-3. `/usr/bin/<objective>.mjs` — optional smoke test of an Objective over the web bridge.
+3. `/usr/bin/<objective>.py` — optional smoke test of an Objective through `moveit_pro shell`.
 
 The sudoers drop-in grants NOPASSWD on **only** steps 1 and 2. The installer validates the version string with a strict regex and downloads to a root-owned path, so a compromised CI account cannot escalate by planting a malicious `.deb`.
 
