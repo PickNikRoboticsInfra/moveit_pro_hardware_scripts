@@ -27,30 +27,32 @@ if [[ -n "$CONFIG_SRC" && ! -f "$CONFIG_SRC" ]]; then
     exit 2
 fi
 
-if ! python3 -c "import roslibpy" 2>/dev/null; then
-    echo "Installing roslibpy"
-    sudo apt-get install -y python3-pip
-    # PEP 668: pip >= 23 on externally-managed Pythons (Ubuntu 23.04+,
-    # Debian 12+) refuses system-wide installs without --break-system-packages.
-    # Older pip (Ubuntu 22.04 ships 22.0.2) does not recognize the flag at all.
-    # Gate on the EXTERNALLY-MANAGED marker — present iff the flag is needed
-    # and supported.
-    PIP_ARGS=(--ignore-installed)
-    if compgen -G "/usr/lib/python3*/EXTERNALLY-MANAGED" > /dev/null; then
-        PIP_ARGS+=(--break-system-packages)
-    fi
-    python3 -m pip install "${PIP_ARGS[@]}" roslibpy
+# The CD objective runner is Node (foxglove-ros-adapter over the web bridge on
+# 3201). Ensure Node.js 18+ is present; install Node 20 LTS via NodeSource if not.
+NODE_MAJOR=0
+if command -v node > /dev/null 2>&1; then
+    NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+fi
+if [[ "$NODE_MAJOR" -lt 18 ]]; then
+    echo "Installing Node.js 20 LTS (via NodeSource)"
+    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+    sudo apt-get install -y nodejs
 fi
 
 echo "Installing shared libraries to /usr/lib/moveit-pro-scripts/"
 sudo install -d -m 0755 -o root -g root /usr/lib/moveit-pro-scripts
-sudo install -m 644 "$SCRIPT_DIR/example_scripts/cd_objective_lib.py" /usr/lib/moveit-pro-scripts/cd_objective_lib.py
+sudo install -m 644 "$SCRIPT_DIR/example_scripts/cd_objective_lib.mjs" /usr/lib/moveit-pro-scripts/cd_objective_lib.mjs
+sudo install -m 644 "$SCRIPT_DIR/example_scripts/ws-polyfill.mjs" /usr/lib/moveit-pro-scripts/ws-polyfill.mjs
+sudo install -m 644 "$SCRIPT_DIR/example_scripts/package.json" /usr/lib/moveit-pro-scripts/package.json
 sudo install -m 644 "$SCRIPT_DIR/bin/notify_lib.py" /usr/lib/moveit-pro-scripts/notify_lib.py
 
+echo "Installing Node dependencies for the CD runner"
+sudo npm install --omit=dev --prefix /usr/lib/moveit-pro-scripts
+
 echo "Installing objective scripts to /usr/bin/"
-sudo install -m 755 "$SCRIPT_DIR/example_scripts/3-waypoint-pick-and-place.py" /usr/bin/3-waypoint-pick-and-place.py
-sudo install -m 755 "$SCRIPT_DIR/example_scripts/ml-segment-image.py" /usr/bin/ml-segment-image.py
-sudo install -m 755 "$SCRIPT_DIR/example_scripts/move-all-boxes.py" /usr/bin/move-all-boxes.py
+sudo install -m 755 "$SCRIPT_DIR/example_scripts/3-waypoint-pick-and-place.mjs" /usr/bin/3-waypoint-pick-and-place.mjs
+sudo install -m 755 "$SCRIPT_DIR/example_scripts/ml-segment-image.mjs" /usr/bin/ml-segment-image.mjs
+sudo install -m 755 "$SCRIPT_DIR/example_scripts/move-all-boxes.mjs" /usr/bin/move-all-boxes.mjs
 
 echo "Installing notify-crash.py to /usr/bin/"
 sudo install -m 755 "$SCRIPT_DIR/bin/notify-crash.py" /usr/bin/notify-crash.py

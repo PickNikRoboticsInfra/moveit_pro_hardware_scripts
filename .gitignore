@@ -1,0 +1,7 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Node dependencies (installed at deploy time by install.sh)
+node_modules/
+package-lock.json

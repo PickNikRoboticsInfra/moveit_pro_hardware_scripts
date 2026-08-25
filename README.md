@@ -10,10 +10,11 @@ The full setup walkthrough lives at [Set Up CI/CD](https://docs.picknik.ai/how_t
 - `bin/install-moveit-pro` — root-owned installer wrapper. Validates the version string against a strict regex, downloads the `.deb` to a root-owned cache, installs it, and deletes the file.
 - `bin/moveit-pro@.service` — systemd template unit. Runs `moveit_pro run` as `%i`. Does not restart on failure (`Restart=no`) — the `ExecStopPost` hook reports the crash instead. Reads optional environment from `/etc/default/moveit-pro`.
 - `bin/notify-crash.py` — posts to Slack and opens/updates a GitHub issue via `ExecStopPost` when the service exits non-zero. Reads `SLACK_WEBHOOK_URL` and `MOVEIT_CD_GITHUB_TOKEN` from the environment; each notification is skipped if its variable is unset.
-- `bin/notify_lib.py` — shared notification helpers (`slack_post`, `github_issue`) used by both `notify-crash.py` and `cd_objective_lib.py`. Installed to `/usr/lib/moveit-pro-scripts/`. `github_issue` deduplicates by exact title within a label: a repeated failure bumps an occurrence counter and appends a row instead of opening a new issue.
+- `bin/notify_lib.py` — shared notification helpers (`slack_post`, `github_issue`) used by `notify-crash.py` (Python import) and by the CD objective runner (`cd_objective_lib.mjs`, via the module's `--title`/`--reason` CLI shim). Installed to `/usr/lib/moveit-pro-scripts/`. `github_issue` deduplicates by exact title within a label: a repeated failure bumps an occurrence counter and appends a row instead of opening a new issue.
 - `bin/ci-runner.sudoers.template` — sudoers drop-in. `install.sh` substitutes `__CI_USER__` with the local account and installs at `/etc/sudoers.d/<user>-ci`. Grants NOPASSWD on the installer and the user's own systemd unit only.
-- `example_scripts/cd_objective_lib.py` — helper library for sending an Objective goal via rosbridge, used by the example scripts. On objective timeout or rosbridge failure it posts to Slack, opens/updates a GitHub issue, and stops the systemd unit (via `notify_lib.py`).
-- `example_scripts/3-waypoint-pick-and-place.py`, `example_scripts/ml-segment-image.py`, `example_scripts/move-all-boxes.py` — example smoke-test scripts that drive an Objective on `localhost:3201` rosbridge.
+- `example_scripts/cd_objective_lib.mjs` — Node helper library for sending an Objective goal over the MoveIt Pro web bridge (`foxglove_bridge`, port `3201`) using [`foxglove-ros-adapter`](https://www.npmjs.com/package/foxglove-ros-adapter). No `--enable-rosbridge` sidecar needed. On objective timeout or bridge failure it posts to Slack, opens/updates a GitHub issue, and stops the systemd unit (via `notify_lib.py`).
+- `example_scripts/package.json` / `ws-polyfill.mjs` — Node dependency manifest (installed alongside the runner and `npm install`ed by `install.sh`) and the `WebSocket` global shim for Node 18–21.
+- `example_scripts/3-waypoint-pick-and-place.mjs`, `example_scripts/ml-segment-image.mjs`, `example_scripts/move-all-boxes.mjs` — example smoke-test scripts that drive an Objective over the web bridge on `localhost:3201`.
 
 ## Install
 
@@ -28,7 +29,7 @@ sudo ./install.sh
 This installs:
 
 - The objective scripts to `/usr/bin/`.
-- `cd_objective_lib.py` and `notify_lib.py` to `/usr/lib/moveit-pro-scripts/`.
+- `cd_objective_lib.mjs` (with its Node dependencies via `npm install`) and `notify_lib.py` to `/usr/lib/moveit-pro-scripts/`.
 - `notify-crash.py` to `/usr/bin/`.
 - `install-moveit-pro` to `/usr/local/sbin/` (root-owned, `0755`).
 - `/var/cache/moveit-pro/` as a root-owned download cache.
@@ -64,7 +65,7 @@ WORKSPACE_PIN_TO_RELEASE=false
 
 ### Optional: failure notifications (Slack + GitHub issues)
 
-Both notifiers read their config from `/etc/default/moveit-pro` (root-owned). The systemd unit loads this file via `EnvironmentFile=`, so `notify-crash.py` and `cd_objective_lib.py` pick it up for crash and CD-failure events. Each notifier is independent: set only the variables you want.
+Both notifiers read their config from `/etc/default/moveit-pro` (root-owned). The systemd unit loads this file via `EnvironmentFile=`, so `notify-crash.py` and the CD objective runner pick it up for crash and CD-failure events. Each notifier is independent: set only the variables you want.
 
 ```bash
 sudo install -m 0640 -o root -g root /dev/stdin /etc/default/moveit-pro <<'EOF'
@@ -107,7 +108,7 @@ The CI runner SSHes into each target machine over a mesh VPN (Tailscale, WireGua
 
 1. `sudo -n /usr/local/sbin/install-moveit-pro <version>` — downloads and installs the `.deb`.
 2. `sudo -n /bin/systemctl restart moveit-pro@<user>.service` — restarts the service.
-3. `/usr/bin/<objective>.py` — optional smoke test of an Objective via rosbridge.
+3. `/usr/bin/<objective>.mjs` — optional smoke test of an Objective over the web bridge.
 
 The sudoers drop-in grants NOPASSWD on **only** steps 1 and 2. The installer validates the version string with a strict regex and downloads to a root-owned path, so a compromised CI account cannot escalate by planting a malicious `.deb`.
 
