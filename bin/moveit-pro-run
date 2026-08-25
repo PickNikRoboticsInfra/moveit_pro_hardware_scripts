@@ -15,6 +15,14 @@
 # On 10.x it is neither needed nor wanted: MuJoCo renders through EGL with no
 # display, and --headless there means something else entirely (it suppresses
 # X11 forwarding for graphical driver programs).
+#
+# From 10.x, also pass --no-discovery. The host's instance discovery daemon is
+# set up by the MoveIt Pro deploy script, and this unit must never start or
+# supervise one of its own.
+# The unit gets no XDG_RUNTIME_DIR today so it could not reach a user manager
+# anyway, but that is an accident of the environment rather than a contract:
+# the unit reads /etc/default/moveit-pro, so one variable added there would
+# silently hand the Runtime a second claim on the same daemon.
 
 set -euo pipefail
 
@@ -27,15 +35,16 @@ moveit_pro_major() {
     sed -n 's/^MoveIt Pro version:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<< "$line"
 }
 
-run_args=(run -v)
+run_args=(run -v --headless)
 
-# Fail safe toward omitting the flag: 10.x rejects nothing here, but a wrong
-# guess that adds --headless on 10.x would silently change driver X11 handling.
+# Fail safe toward omitting the flag. Adding --no-discovery on 9.4 is fatal (its
+# typer CLI rejects unknown options), while omitting it on 10.x only leaves the
+# Runtime able to supervise a daemon it will not reach from this unit anyway.
 major="$(moveit_pro_major || true)"
-if [[ -n "$major" && "$major" -lt 10 ]]; then
-    run_args+=(--headless)
+if [[ -n "$major" && "$major" -ge 10 ]]; then
+    run_args+=(--no-discovery)
 elif [[ -z "$major" ]]; then
-    echo "Could not read a version from '$MOVEIT_PRO_CLI --version'; omitting --headless" >&2
+    echo "Could not read a version from '$MOVEIT_PRO_CLI --version'; omitting --no-discovery" >&2
 fi
 
 exec "$MOVEIT_PRO_CLI" "${run_args[@]}" "$@"
