@@ -149,13 +149,22 @@ A password prompt on the first command means the sudoers drop-in did not land. R
 
 ## CD pipeline
 
-The CI runner SSHes into each target machine over a mesh VPN (Tailscale, WireGuard, or any other) and runs three commands in order:
+The CI runner SSHes into each target machine over a mesh VPN (Tailscale, WireGuard, or any other) and runs these commands in order:
 
 1. `sudo -n /usr/local/sbin/install-moveit-pro <version>` — downloads and installs the `.deb`.
-2. `sudo -n /bin/systemctl restart moveit-pro@<user>.service` — restarts the service.
-3. `/usr/bin/<objective>.py` — optional smoke test of an Objective through `moveit_pro shell`.
+2. `moveit_pro discovery up` — **MoveIt Pro 10 and later only.** Starts the host's instance discovery daemon so a Desktop App can find this machine. 9.4.x has no `discovery` subcommand; skip it there.
+3. `sudo -n /bin/systemctl restart moveit-pro@<user>.service` — restarts the service.
+4. `/usr/bin/<objective>.py` — optional smoke test of an Objective through `moveit_pro shell`.
 
-The sudoers drop-in grants NOPASSWD on **only** steps 1 and 2. The installer validates the version string with a strict regex and downloads to a root-owned path, so a compromised CI account cannot escalate by planting a malicious `.deb`.
+Three things about step 2 are easy to get wrong:
+
+- **Run it as the CI user, not through `sudo`.** The daemon is a systemd *user* service and its owner-local socket path derives from that account's uid, so a root-owned daemon is one the Runtime cannot register with.
+- **Run it on every deploy, not once at provisioning.** It is idempotent, and re-running it refreshes the unit files after a release upgrade replaces the daemon's code.
+- **It belongs in the CD job rather than `install.sh`.** An SSH session gives the CI user a systemd user manager, which `moveit_pro discovery up` needs in order to install its units and to enable the lingering that keeps the daemon alive after logout. `install.sh` runs as root at provisioning time, often before any release is on the machine at all.
+
+The Runtime does not fight this: from 10.x the unit passes `--no-discovery`, so it registers with the daemon step 2 started instead of supervising one of its own. See [Desktop App pairing](#desktop-app-pairing).
+
+The sudoers drop-in grants NOPASSWD on **only** steps 1 and 3. The installer validates the version string with a strict regex and downloads to a root-owned path, so a compromised CI account cannot escalate by planting a malicious `.deb`.
 
 See [Set Up CI/CD](https://docs.picknik.ai/how_to/computer_configuration/ci_cd_for_objectives/) for the full pipeline, a sample GitHub Actions workflow, and the security model.
 
