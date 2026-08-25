@@ -1,0 +1,26 @@
+name: install
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Runs install.sh for real on every Ubuntu release we support, in a bare
+  # container of that release. Catches the things that only differ between
+  # releases: the node/npm packaging split, sudo vs. sudo-rs, and whichever
+  # python3 the release happens to ship.
+  container-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ["22.04", "24.04", "26.04"]
+    name: ubuntu-${{ matrix.release }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install and verify
+        run: |
+          docker run --rm -v "$PWD:/src:ro" \
+            "ubuntu:${{ matrix.release }}" \
+            bash /src/test/container_smoke.sh

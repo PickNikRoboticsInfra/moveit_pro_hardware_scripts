@@ -4,16 +4,35 @@ Reference installer, systemd unit, and sudoers template for running [MoveIt Pro]
 
 The full setup walkthrough lives at [Set Up CI/CD](https://docs.picknik.ai/how_to/computer_configuration/ci_cd_for_objectives/) in the MoveIt Pro docs. This README covers what is in the repo and how to use it directly.
 
+## Supported systems
+
+Ubuntu 22.04, 24.04, and 26.04, on each release's stock `sudo` (26.04 defaults to
+`sudo-rs`) and stock `python3` (3.10, 3.12, and 3.14 — everything here is
+standard library, so nothing is pip-installed and PEP 668 never comes up).
+
+`install.sh` needs Node 22 or newer and its `npm`. 22.04 and 24.04 both package a
+Node older than that, and Ubuntu ships `npm` as a package separate from `nodejs`,
+so on most machines the installer pulls Node 22 LTS from NodeSource. It leaves an
+existing system Node alone when that Node is new enough and `npm` is beside it.
+
+`test/container_smoke.sh` runs the installer end-to-end in a bare container and
+checks the result. CI runs it on all three releases; to run it yourself:
+
+```bash
+docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/test/container_smoke.sh
+```
+
 ## Contents
 
-- `install.sh` — one-shot installer. Copies the wrapper, systemd unit, and sudoers drop-in into place. Run on each target machine.
+- `install.sh` — one-shot installer. Installs prerequisites (including Node), then copies the wrapper, systemd unit, and sudoers drop-in into place. Must be run as root; run it on each target machine.
 - `bin/install-moveit-pro` — root-owned installer wrapper. Validates the version string against a strict regex, downloads the `.deb` to a root-owned cache, installs it, and deletes the file.
 - `bin/moveit-pro@.service` — systemd template unit. Runs `moveit_pro run` as `%i`. Does not restart on failure (`Restart=no`) — the `ExecStopPost` hook reports the crash instead. Reads optional environment from `/etc/default/moveit-pro`.
 - `bin/notify-crash.py` — posts to Slack and opens/updates a GitHub issue via `ExecStopPost` when the service exits non-zero. Reads `SLACK_WEBHOOK_URL` and `MOVEIT_CD_GITHUB_TOKEN` from the environment; each notification is skipped if its variable is unset.
 - `bin/notify_lib.py` — shared notification helpers (`slack_post`, `github_issue`) used by `notify-crash.py` (Python import) and by the CD objective runner (`cd_objective_lib.mjs`, via the module's `--title`/`--reason` CLI shim). Installed to `/usr/lib/moveit-pro-scripts/`. `github_issue` deduplicates by exact title within a label: a repeated failure bumps an occurrence counter and appends a row instead of opening a new issue.
 - `bin/ci-runner.sudoers.template` — sudoers drop-in. `install.sh` substitutes `__CI_USER__` with the local account and installs at `/etc/sudoers.d/<user>-ci`. Grants NOPASSWD on the installer and the user's own systemd unit only.
 - `example_scripts/cd_objective_lib.mjs` — Node helper library for sending an Objective goal over the MoveIt Pro web bridge (`foxglove_bridge`, port `3201`) using [`foxglove-ros-adapter`](https://www.npmjs.com/package/foxglove-ros-adapter). No `--enable-rosbridge` sidecar needed. On objective timeout or bridge failure it posts to Slack, opens/updates a GitHub issue, and stops the systemd unit (via `notify_lib.py`).
-- `example_scripts/package.json` / `ws-polyfill.mjs` — Node dependency manifest (installed alongside the runner and `npm install`ed by `install.sh`) and the `WebSocket` global shim for Node 18–21.
+- `example_scripts/package.json` / `ws-polyfill.mjs` — Node dependency manifest (installed alongside the runner and `npm install`ed by `install.sh`) and the `WebSocket` global shim for Node 18–21. The shim does nothing on Node 22+, which is what the installer sets up; it stays for machines pinned to an older Node.
+- `test/container_smoke.sh` — runs `install.sh` in a bare Ubuntu container and verifies the result. See [Supported systems](#supported-systems).
 - `example_scripts/3-waypoint-pick-and-place.mjs`, `example_scripts/ml-segment-image.mjs`, `example_scripts/move-all-boxes.mjs` — example smoke-test scripts that drive an Objective over the web bridge on `localhost:3201`.
 
 ## Install
@@ -21,13 +40,14 @@ The full setup walkthrough lives at [Set Up CI/CD](https://docs.picknik.ai/how_t
 On the target machine:
 
 ```bash
-git clone https://github.com/PickNikRobotics/moveit_pro_hardware_scripts.git
+git clone https://github.com/PickNikRoboticsInfra/moveit_pro_hardware_scripts.git
 cd moveit_pro_hardware_scripts
 sudo ./install.sh
 ```
 
 This installs:
 
+- Prerequisites via apt (`ca-certificates`, `curl`, `gnupg`, `xvfb`) and, when the system Node is too old or has no `npm`, Node 22 LTS from NodeSource.
 - The objective scripts to `/usr/bin/`.
 - `cd_objective_lib.mjs` (with its Node dependencies via `npm install`) and `notify_lib.py` to `/usr/lib/moveit-pro-scripts/`.
 - `notify-crash.py` to `/usr/bin/`.
