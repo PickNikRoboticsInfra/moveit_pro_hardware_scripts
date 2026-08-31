@@ -24,7 +24,7 @@ docker run --rm -v "$PWD:/src:ro" ubuntu:26.04 bash /src/test/container_smoke.sh
 
 ## Contents
 
-- `install.sh` — one-shot installer. Installs apt prerequisites, then copies the wrapper, systemd unit, and sudoers drop-in into place. Must be run as root; run it on each target machine.
+- `install.sh` — one-shot installer. Installs apt prerequisites, copies the wrapper, systemd unit, and sudoers drop-in into place, and enables the CI user's persistent systemd user manager. Run it through `sudo` from the non-root CI account on each target machine; direct root invocation is rejected so the target identity cannot fall back to `root`.
 - `bin/moveit-pro-run` — the unit's `ExecStart`. Passes `--headless` on every series: below 10.x the launcher refuses to start without a `DISPLAY` unless it is set, and it drops only the `web_ui` service, so the REST API, the web bridge on `3201`, and video stay reachable and no browser opens. It also reads `moveit_pro --version` to add `--no-discovery` from 10.x, where that flag stops the unit from supervising a discovery daemon the MoveIt Pro deploy script owns; 9.4.x has no such option and its CLI rejects unknown ones, so an unreadable version omits it.
 - `bin/install-moveit-pro` — root-owned installer wrapper. Validates the version string against a strict regex, downloads the `.deb` to a root-owned cache, installs it, and deletes the file.
 - `bin/moveit-pro@.service` — systemd template unit. Runs `moveit-pro-run` as `%i`. Does not restart on failure (`Restart=no`) — the `ExecStopPost` hook reports the crash instead. Reads optional environment from `/etc/default/moveit-pro`.
@@ -55,6 +55,7 @@ This installs:
 - `/var/cache/moveit-pro/` as a root-owned download cache.
 - `moveit-pro@.service` to `/etc/systemd/system/`.
 - `/etc/sudoers.d/<user>-ci` (validated with `visudo -cf`) granting NOPASSWD on the installer and `systemctl restart`/`stop` of the user's own service unit.
+- Persistent systemd user-manager state for the CI account (`loginctl enable-linger` plus an initial `user@<uid>.service` start), so headless deploy sessions can manage discovery user units.
 
 The install script enables — but does not start — the MoveIt Pro service for the current user.
 
@@ -113,9 +114,9 @@ instance discovery daemon and the Runtime registers with it. Those are two jobs 
 two owners, and this repo owns only the second.
 
 **Starting the daemon is not done here.** It is a systemd user service, and the MoveIt
-Pro deploy script sets it up (`moveit_pro discovery up`, which also enables the user
-lingering that keeps the daemon alive past logout). Nothing in this repo starts it
-or enables that lingering.
+Pro deploy script sets it up with `moveit_pro discovery up`. This installer does enable
+lingering and starts the account's user manager, because Tailscale SSH does not create a
+PAM/logind session from which the unprivileged deploy command could bootstrap one.
 
 **Registering with it is done here, by staying out of the way.** From 10.x the unit
 passes `--no-discovery`, so `moveit_pro run` never starts or supervises a daemon of its
@@ -156,11 +157,12 @@ The CI runner SSHes into each target machine over a mesh VPN (Tailscale, WireGua
 3. `sudo -n /bin/systemctl restart moveit-pro@<user>.service` — restarts the service.
 4. `/usr/bin/<objective>.py` — optional smoke test of an Objective through `moveit_pro shell`.
 
-Three things about step 2 are easy to get wrong:
+Four things about step 2 are easy to get wrong:
 
 - **Run it as the CI user, not through `sudo`.** The daemon is a systemd *user* service and its owner-local socket path derives from that account's uid, so a root-owned daemon is one the Runtime cannot register with.
+- **Provision the account first.** `install.sh` enables lingering and starts the account's user manager. A Tailscale SSH shell does not create a PAM/logind session, and the unprivileged CLI cannot authorize `loginctl enable-linger` by itself.
 - **Run it on every deploy, not once at provisioning.** It is idempotent, and re-running it refreshes the unit files after a release upgrade replaces the daemon's code.
-- **It belongs in the CD job rather than `install.sh`.** An SSH session gives the CI user a systemd user manager, which `moveit_pro discovery up` needs in order to install its units and to enable the lingering that keeps the daemon alive after logout. `install.sh` runs as root at provisioning time, often before any release is on the machine at all.
+- **Keep daemon installation in the CD job rather than `install.sh`.** Provisioning establishes only the persistent user manager; it often runs before any MoveIt Pro release is installed. The release-specific CLI must still install or refresh the discovery units after every package deployment.
 
 The Runtime does not fight this: from 10.x the unit passes `--no-discovery`, so it registers with the daemon step 2 started instead of supervising one of its own. See [Desktop App pairing](#desktop-app-pairing).
 
