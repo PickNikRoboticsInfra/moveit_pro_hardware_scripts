@@ -23,9 +23,17 @@ apt-get install -y -qq sudo > /dev/null
 useradd -m "$CI_USER"
 
 # systemd does not run in a container, so the unit-management calls cannot
-# succeed. Stub systemctl to a no-op that echoes; everything else runs for real.
-printf '#!/bin/sh\necho "  [stub] systemctl $*"\n' > /usr/bin/systemctl
+# succeed. Stub systemctl/loginctl and record the privileged provisioning contract;
+# everything else runs for real.
+SYSTEMD_CALLS=/tmp/moveit-pro-systemd-calls
+export SYSTEMD_CALLS
+# Single-quoted on purpose: the generated stubs expand these variables later.
+# shellcheck disable=SC2016
+printf '#!/bin/sh\necho "systemctl $*" >> "$SYSTEMD_CALLS"\necho "  [stub] systemctl $*"\n' > /usr/bin/systemctl
 chmod 755 /usr/bin/systemctl
+# shellcheck disable=SC2016
+printf '#!/bin/sh\necho "loginctl $*" >> "$SYSTEMD_CALLS"\necho "  [stub] loginctl $*"\n' > /usr/bin/loginctl
+chmod 755 /usr/bin/loginctl
 
 # shellcheck disable=SC1091 # /etc/os-release is provided by the OS.
 . /etc/os-release
@@ -34,13 +42,36 @@ echo "::: ${PRETTY_NAME} / $(sudo --version 2> /dev/null | head -1)"
 cp -r /src /work
 cd /work
 
-echo "::: running install.sh"
-SUDO_USER="$CI_USER" ./install.sh
-
 fail() {
     echo "FAIL: $1" >&2
     exit 1
 }
+
+assert_rejected_identity() {
+    local label="$1"
+    shift
+    : > "$SYSTEMD_CALLS"
+    local output status
+    set +e
+    output="$("$@" ./install.sh 2>&1)"
+    status=$?
+    set -e
+    [[ "$status" -ne 0 ]] || fail "$label identity was accepted"
+    [[ ! -s "$SYSTEMD_CALLS" ]] || fail "$label reached systemd provisioning"
+    [[ ! -e /usr/bin/3-waypoint-pick-and-place.py ]] \
+        || fail "$label installed files before identity validation"
+    grep -q "non-root sudo user" <<< "$output" \
+        || fail "$label did not report the identity requirement: $output"
+}
+
+echo "::: checking installer rejects unsafe provisioning identities"
+assert_rejected_identity "missing" env -u SUDO_USER -u USER
+assert_rejected_identity "root" env SUDO_USER=root
+assert_rejected_identity "option-like" env 'SUDO_USER=--help'
+assert_rejected_identity "unknown" env SUDO_USER=moveit-user-does-not-exist
+
+echo "::: running install.sh"
+SUDO_USER="$CI_USER" ./install.sh
 
 echo "::: checking installed files"
 for f in /usr/bin/3-waypoint-pick-and-place.py /usr/bin/ml-segment-image.py \
@@ -53,6 +84,13 @@ for f in /usr/lib/moveit-pro-scripts/cd_objective_lib.py \
     /etc/systemd/system/moveit-pro@.service; do
     [[ -f "$f" ]] || fail "$f missing"
 done
+
+echo "::: checking persistent systemd user-manager provisioning"
+CI_UID="$(id -u "$CI_USER")"
+grep -Fxq "loginctl enable-linger $CI_USER" "$SYSTEMD_CALLS" \
+    || fail "install.sh did not enable lingering for $CI_USER"
+grep -Fxq "systemctl start user@${CI_UID}.service" "$SYSTEMD_CALLS" \
+    || fail "install.sh did not start the $CI_USER user manager"
 
 echo "::: checking the sudoers drop-in parses on this release's sudo"
 /usr/sbin/visudo -cf "/etc/sudoers.d/${CI_USER}-ci" > /dev/null \

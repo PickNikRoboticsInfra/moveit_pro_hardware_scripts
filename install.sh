@@ -32,6 +32,19 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
+# Provision services for the unprivileged account that invoked sudo. Refuse a
+# direct root invocation or an option-like/path-like identity before installing
+# anything system-wide.
+if [[ -z "${SUDO_USER:-}" || ! "$SUDO_USER" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]]; then
+    echo "This script requires an explicit non-root sudo user: sudo ./install.sh [--config <file>]" >&2
+    exit 1
+fi
+LOCAL_USER="$SUDO_USER"
+if ! LOCAL_UID="$(id -u -- "$LOCAL_USER" 2> /dev/null)" || [[ "$LOCAL_UID" -eq 0 ]]; then
+    echo "This script requires an explicit non-root sudo user: sudo ./install.sh [--config <file>]" >&2
+    exit 1
+fi
+
 # shellcheck disable=SC1091 # /etc/os-release is provided by the OS.
 . /etc/os-release
 case "${VERSION_ID:-}" in
@@ -81,8 +94,10 @@ cp "$SCRIPT_DIR/bin/moveit-pro@.service" /etc/systemd/system/moveit-pro@.service
 
 systemctl daemon-reload
 
-# Detect the local user (the user who invoked sudo, not root).
-LOCAL_USER="${SUDO_USER:-$USER}"
+echo "Enabling persistent systemd user manager for ${LOCAL_USER}"
+loginctl enable-linger "$LOCAL_USER"
+systemctl start "user@${LOCAL_UID}.service"
+
 echo "Enabling moveit-pro@${LOCAL_USER}.service"
 systemctl enable "moveit-pro@${LOCAL_USER}.service"
 
